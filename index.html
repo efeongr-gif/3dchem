@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Molekül Görüntüleyici (CJSON)</title>
+<style>
+:root{--bg:#eaf0f6;--panel:#fff;--ink:#14213d;--muted:#566275;--line:#cfd8e3;--accent:#0b7a75;--err:#b42318}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1621;--panel:#18222f;--ink:#e8eef7;--muted:#9aa7b8;--line:#2a3646;--accent:#3cc4bb;--err:#ff8a80}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,"Segoe UI",Roboto,"Noto Sans",sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+h1{font-size:1.05rem;margin:0 8px 0 0;font-weight:650}
+button{min-height:46px;padding:0 16px;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+.seg{display:flex}.seg button{border-radius:0;margin-left:-1px}
+.seg button:first-child{border-radius:8px 0 0 8px;margin:0}.seg button:last-child{border-radius:0 8px 8px 0}
+.primary{background:var(--ink);color:var(--panel);border-color:var(--ink);font-weight:600}
+main{position:relative;flex:1;min-height:0}
+canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+canvas:active{cursor:grabbing}
+#info{position:absolute;left:14px;bottom:12px;right:14px;pointer-events:none;font-size:1.05rem}
+#info b{font-size:1.5rem;font-weight:650}
+#info span{color:var(--muted)}
+#info.err{color:var(--err);font-weight:600}
+#drop{position:absolute;inset:10px;display:none;place-items:center;border:3px dashed var(--accent);border-radius:14px;background:color-mix(in srgb,var(--bg) 85%,transparent);font-size:1.4rem;font-weight:600}
+#drop.on{display:grid}
+</style>
+</head>
+<body>
+<header>
+  <h1>Molekül Görüntüleyici</h1>
+  <button class="primary" id="open">Dosya aç</button>
+  <button id="sample">Örnek</button>
+  <div class="seg" role="group" aria-label="Gösterim biçimi">
+    <button data-style="ball" aria-pressed="true">Top-çubuk</button>
+    <button data-style="fill" aria-pressed="false">Dolu</button>
+    <button data-style="wire" aria-pressed="false">Tel</button>
+  </div>
+  <button id="labels" aria-pressed="false">Etiketler</button>
+  <button id="spin" aria-pressed="false">Döndür</button>
+  <button id="reset">Sıfırla</button>
+  <input type="file" id="file" accept=".cjson,.json,.xyz" hidden>
+</header>
+<main>
+  <canvas id="cv" aria-label="3 boyutlu molekül modeli"></canvas>
+  <div id="info"></div>
+  <div id="drop">Dosyayı buraya bırakın</div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const cv=$('#cv'),ctx=cv.getContext('2d'),info=$('#info');
+const SYM="H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe".split(' ');
+const COL={H:'#f4f4f4',C:'#6f7a8a',N:'#3f63f5',O:'#e5392e',F:'#6fd05a',P:'#ff8c1a',S:'#f2c500',Cl:'#26c426',Br:'#a63232',I:'#8f1a9a',Na:'#ab5cf2',K:'#8f40d4',Ca:'#3dff00',Mg:'#8aff00',Fe:'#e06633',Cu:'#c88033',Zn:'#7d80b0',Li:'#cc80ff',B:'#ffb5b5',Si:'#f0c8a0',Al:'#bfa6a6'};
+const COV={H:.31,He:.28,Li:1.28,Be:.96,B:.84,C:.76,N:.71,O:.66,F:.57,Ne:.58,Na:1.66,Mg:1.41,Al:1.21,Si:1.11,P:1.07,S:1.05,Cl:1.02,Ar:1.06,K:2.03,Ca:1.76,Fe:1.32,Cu:1.32,Zn:1.22,Br:1.2,I:1.39};
+const cov=s=>COV[s]??1.3, col=s=>COL[s]??'#c46bd1';
+
+let mol=null,style='ball',labels=false,auto=false,yaw=.5,pitch=.3,zoom=1,base=1,dirty=true,dpr=1;
+
+/* ---------- Ayrıştırma ---------- */
+function build(atoms,bonds,name){
+  const n=atoms.length;
+  if(!n)throw new Error('Dosyada atom bulunamadı.');
+  const c=[0,1,2].map(k=>atoms.reduce((s,a)=>s+a.p[k],0)/n);
+  atoms.forEach(a=>a.p=a.p.map((v,k)=>v-c[k]));
+  if(!bonds.length){ // bağ yoksa uzaklığa göre tahmin et
+    for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
+      const d=Math.hypot(...atoms[i].p.map((v,k)=>v-atoms[j].p[k]));
+      if(d>.4&&d<(cov(atoms[i].s)+cov(atoms[j].s))*1.2)bonds.push([i,j,1]);
+    }
+  }
+  const deg=new Array(n).fill(0);bonds.forEach(b=>{deg[b[0]]++;deg[b[1]]++});
+  const R=Math.max(1,...atoms.map(a=>Math.hypot(...a.p)));
+  return{atoms,bonds,deg,R,name};
+}
+function parseCJSON(t,fname){
+  const j=JSON.parse(t),a=j.atoms;
+  if(!a||!a.elements||!a.coords)throw new Error('Geçerli bir CJSON değil (atoms bölümü yok).');
+  const xyz=a.coords['3d'];
+  if(!xyz)throw new Error('Dosyada 3B koordinat (coords.3d) yok.');
+  const atoms=a.elements.number.map((z,i)=>({s:SYM[z-1]||'X',p:[xyz[3*i],xyz[3*i+1],xyz[3*i+2]]}));
+  const idx=j.bonds?.connections?.index||[],ord=j.bonds?.order||[],bonds=[];
+  for(let i=0;i<idx.length;i+=2)bonds.push([idx[i],idx[i+1],Math.min(3,Math.max(1,Math.round(ord[i/2]||1)))]);
+  return build(atoms,bonds,j.name||fname);
+}
+function parseXYZ(t,fname){
+  const L=t.trim().split(/\r?\n/),n=parseInt(L[0]),atoms=[];
+  for(let i=2;i<2+n&&i<L.length;i++){
+    const f=L[i].trim().split(/\s+/);
+    atoms.push({s:f[0].replace(/\d+$/,''),p:[+f[1],+f[2],+f[3]]});
+  }
+  return build(atoms,[],L[1]?.trim()||fname);
+}
+function hill(m){
+  const c={};m.atoms.forEach(a=>c[a.s]=(c[a.s]||0)+1);
+  const keys=Object.keys(c).sort(),has=c.C;
+  const order=has?['C','H',...keys.filter(k=>k!=='C'&&k!=='H')]:keys;
+  const sub='₀₁₂₃₄₅₆₇₈₉';
+  return order.filter(k=>c[k]).map(k=>k+(c[k]>1?String(c[k]).replace(/\d/g,d=>sub[d]):'')).join('');
+}
+function show(m){
+  mol=m;yaw=.5;pitch=.3;zoom=1;dirty=true;info.className='';
+  info.innerHTML=`<b>${hill(m)}</b> <span>&nbsp;${m.atoms.length} atom, ${m.bonds.length} bağ — ${String(m.name).replace(/[<>&]/g,'')}</span>`;
+}
+function fail(e){info.className='err';info.textContent='Açılamadı: '+e.message}
+async function loadFile(f){
+  try{
+    const t=await f.text();
+    show(t.trim().startsWith('{')?parseCJSON(t,f.name):parseXYZ(t,f.name));
+  }catch(e){fail(e)}
+}
+function benzene(){
+  const atoms=[],bonds=[];
+  for(let i=0;i<6;i++){
+    const a=i*Math.PI/3,c=Math.cos(a),s=Math.sin(a);
+    atoms.push({s:'C',p:[1.4*c,1.4*s,0]});
+  }
+  for(let i=0;i<6;i++){
+    const a=i*Math.PI/3;atoms.push({s:'H',p:[2.48*Math.cos(a),2.48*Math.sin(a),0]});
+    bonds.push([i,(i+1)%6,i%2?1:2],[i,6+i,1]);
+  }
+  return build(atoms,bonds,'Örnek: benzen');
+}
+
+/* ---------- Çizim ---------- */
+function line(x1,y1,x2,y2){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()}
+function wireCol(s){return s==='H'?'#9aa3b0':col(s)}
+function drawBond(pa,pb,o){
+  const wire=style==='wire',k=(pa.k+pb.k)/2;
+  const lw=wire?2.5:.1*base*k*(o>1?.62:1),gap=wire?4.5:.17*base*k;
+  const dx=pb.x-pa.x,dy=pb.y-pa.y,L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L;
+  ctx.lineWidth=lw;ctx.lineCap='round';
+  for(let t=0;t<o;t++){
+    const off=(t-(o-1)/2)*gap,ax=pa.x+nx*off,ay=pa.y+ny*off,bx=pb.x+nx*off,by=pb.y+ny*off;
+    if(wire){const mx=(ax+bx)/2,my=(ay+by)/2;
+      ctx.strokeStyle=wireCol(pa.a.s);line(ax,ay,mx,my);
+      ctx.strokeStyle=wireCol(pb.a.s);line(mx,my,bx,by);
+    }else{ctx.strokeStyle='#9aa3b0';line(ax,ay,bx,by)}
+  }
+}
+function drawAtom(p,rw){
+  const r=Math.max(2.5,rw*base*p.k);
+  ctx.beginPath();ctx.arc(p.x,p.y,r,0,7);ctx.fillStyle=col(p.a.s);ctx.fill();
+  const g=ctx.createRadialGradient(p.x-r*.35,p.y-r*.35,r*.05,p.x,p.y,r);
+  g.addColorStop(0,'rgba(255,255,255,.65)');g.addColorStop(.5,'rgba(255,255,255,0)');g.addColorStop(1,'rgba(0,0,0,.35)');
+  ctx.fillStyle=g;ctx.fill();
+  ctx.lineWidth=1;ctx.strokeStyle='rgba(0,0,0,.25)';ctx.stroke();
+}
+function drawLabel(p,rw){
+  const r=rw*base*p.k;
+  ctx.textBaseline='middle';ctx.lineJoin='round';ctx.strokeStyle='rgba(0,0,0,.65)';ctx.fillStyle='#fff';
+  if(style==='wire'){ctx.font='600 14px system-ui,sans-serif';ctx.textAlign='left';ctx.lineWidth=3;ctx.strokeText(p.a.s,p.x+6,p.y-6);ctx.fillText(p.a.s,p.x+6,p.y-6)}
+  else if(r>6){ctx.font=`600 ${Math.round(r*.95)}px system-ui,sans-serif`;ctx.textAlign='center';ctx.lineWidth=3;ctx.strokeText(p.a.s,p.x,p.y);ctx.fillText(p.a.s,p.x,p.y)}
+}
+function draw(){
+  const w=cv.clientWidth,h=cv.clientHeight;
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+  if(!mol)return;
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const ext=mol.R+(style==='fill'?1.8:1.2);
+  base=Math.min(w,h)/(2.3*ext)*zoom;
+  const D=5*ext;
+  const P=mol.atoms.map(a=>{
+    const[x,y,z]=a.p,x1=x*cy+z*sy,z1=-x*sy+z*cy,y2=y*cp-z1*sp,z2=y*sp+z1*cp,k=D/(D-z2);
+    return{x:w/2+x1*base*k,y:h/2-y2*base*k,z:z2,k,a};
+  });
+  const rw=a=>style==='ball'?.18+cov(a.s)*.14:style==='fill'?cov(a.s)+.45:.09;
+  const items=[];
+  P.forEach((p,i)=>{
+    if(style==='wire'&&mol.deg[i]>0&&!labels)return;
+    items.push({z:p.z,f:()=>{
+      if(style!=='wire'||mol.deg[i]===0)drawAtom(p,rw(p.a));
+      if(labels)drawLabel(p,rw(p.a));
+    }});
+  });
+  if(style!=='fill')mol.bonds.forEach(([i,j,o])=>items.push({z:(P[i].z+P[j].z)/2,f:()=>drawBond(P[i],P[j],o)}));
+  items.sort((a,b)=>a.z-b.z).forEach(it=>it.f());
+}
+function resize(){
+  dpr=window.devicePixelRatio||1;
+  cv.width=Math.round(cv.clientWidth*dpr);cv.height=Math.round(cv.clientHeight*dpr);dirty=true;
+}
+new ResizeObserver(resize).observe(cv);
+(function tick(){
+  if(auto&&!ptrs.size){yaw+=.008;dirty=true}
+  if(dirty){dirty=false;draw()}
+  requestAnimationFrame(tick);
+})();
+
+/* ---------- Etkileşim (fare + dokunmatik) ---------- */
+const ptrs=new Map();let pinch=0;
+const pdist=()=>{if(ptrs.size<2)return 0;const[a,b]=[...ptrs.values()];return Math.hypot(a[0]-b[0],a[1]-b[1])};
+const clampZ=z=>Math.min(6,Math.max(.25,z));
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);pinch=pdist()});
+cv.addEventListener('pointermove',e=>{
+  const o=ptrs.get(e.pointerId);if(!o)return;
+  const n=[e.clientX,e.clientY];ptrs.set(e.pointerId,n);
+  if(ptrs.size===1){yaw+=(n[0]-o[0])*.01;pitch+=(n[1]-o[1])*.01}
+  else if(ptrs.size===2){const d=pdist();if(pinch)zoom=clampZ(zoom*d/pinch);pinch=d}
+  dirty=true;
+});
+['pointerup','pointercancel'].forEach(t=>cv.addEventListener(t,e=>{ptrs.delete(e.pointerId);pinch=pdist()}));
+cv.addEventListener('wheel',e=>{e.preventDefault();zoom=clampZ(zoom*Math.exp(-e.deltaY*.0015));dirty=true},{passive:false});
+
+/* ---------- Düğmeler ve dosya bırakma ---------- */
+$('#open').onclick=()=>$('#file').click();
+$('#file').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value=''};
+$('#sample').onclick=()=>show(benzene());
+$('#reset').onclick=()=>{yaw=.5;pitch=.3;zoom=1;dirty=true};
+document.querySelectorAll('[data-style]').forEach(b=>b.onclick=()=>{
+  style=b.dataset.style;
+  document.querySelectorAll('[data-style]').forEach(x=>x.setAttribute('aria-pressed',x===b));
+  dirty=true;
+});
+function toggle(id,fn){const b=$(id);b.onclick=()=>{const v=b.getAttribute('aria-pressed')!=='true';b.setAttribute('aria-pressed',v);fn(v);dirty=true}}
+toggle('#labels',v=>labels=v);
+toggle('#spin',v=>auto=v);
+addEventListener('dragover',e=>{e.preventDefault();$('#drop').classList.add('on')});
+addEventListener('dragleave',e=>{if(!e.relatedTarget)$('#drop').classList.remove('on')});
+addEventListener('drop',e=>{e.preventDefault();$('#drop').classList.remove('on');if(e.dataTransfer.files[0])loadFile(e.dataTransfer.files[0])});
+
+show(benzene());
+</script>
+</body>
+</html>
