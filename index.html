@@ -5,27 +5,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Molekül Görüntüleyici (CJSON)</title>
 <style>
-:root{--bg:#eaf0f6;--panel:#fff;--ink:#14213d;--muted:#566275;--line:#cfd8e3;--accent:#0b7a75;--err:#b42318}
+:root{--bg:#e6edf5;--panel:#fff;--ink:#14213d;--muted:#566275;--line:#cfd8e3;--accent:#0b7a75;--err:#b42318}
 @media (prefers-color-scheme:dark){:root{--bg:#0e1621;--panel:#18222f;--ink:#e8eef7;--muted:#9aa7b8;--line:#2a3646;--accent:#3cc4bb;--err:#ff8a80}}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,"Segoe UI",Roboto,"Noto Sans",sans-serif}
-header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
-h1{font-size:1.05rem;margin:0 8px 0 0;font-weight:650}
-button{min-height:46px;padding:0 16px;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;cursor:pointer}
-button:hover{border-color:var(--accent)}
-button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+h1{font-size:1.05rem;margin:0 6px 0 0;font-weight:650}
+button,select{min-height:46px;padding:0 14px;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;cursor:pointer}
+button:hover,select:hover{border-color:var(--accent)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff}
 .seg{display:flex}.seg button{border-radius:0;margin-left:-1px}
 .seg button:first-child{border-radius:8px 0 0 8px;margin:0}.seg button:last-child{border-radius:0 8px 8px 0}
 .primary{background:var(--ink);color:var(--panel);border-color:var(--ink);font-weight:600}
-main{position:relative;flex:1;min-height:0}
+main{position:relative;flex:1;min-height:0;background:var(--bg)}
 canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
 canvas:active{cursor:grabbing}
-#info{position:absolute;left:14px;bottom:12px;right:14px;pointer-events:none;font-size:1.05rem}
+#info{position:absolute;left:14px;bottom:12px;right:14px;pointer-events:none;font-size:1.05rem;color:var(--ink);text-shadow:0 0 6px var(--bg),0 0 2px var(--bg)}
 #info b{font-size:1.5rem;font-weight:650}
-#info span{color:var(--muted)}
+#info small{display:block;color:var(--muted);font-size:.9rem}
 #info.err{color:var(--err);font-weight:600}
+#meas{position:absolute;right:14px;top:12px;min-width:210px;padding:10px 14px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;pointer-events:none;display:none}
+#meas.on{display:block}#meas div{padding:1px 0}#meas i{color:var(--muted);font-style:normal}
 #drop{position:absolute;inset:10px;display:none;place-items:center;border:3px dashed var(--accent);border-radius:14px;background:color-mix(in srgb,var(--bg) 85%,transparent);font-size:1.4rem;font-weight:600}
 #drop.on{display:grid}
 </style>
@@ -37,44 +39,57 @@ canvas:active{cursor:grabbing}
   <button id="sample">Örnek</button>
   <div class="seg" role="group" aria-label="Gösterim biçimi">
     <button data-style="ball" aria-pressed="true">Top-çubuk</button>
-    <button data-style="fill" aria-pressed="false">Dolu</button>
+    <button data-style="stick" aria-pressed="false">Çubuk</button>
+    <button data-style="fill" aria-pressed="false">Van der Waals</button>
     <button data-style="wire" aria-pressed="false">Tel</button>
   </div>
-  <button id="labels" aria-pressed="false">Etiketler</button>
+  <select id="lab" aria-label="Etiketler"><option value="0">Etiket: yok</option><option value="1">Etiket: sembol</option><option value="2">Etiket: numara</option></select>
+  <button id="hyd" aria-pressed="true">Hidrojen</button>
+  <button id="persp" aria-pressed="true">Perspektif</button>
+  <button id="rebond">Bağları yeniden hesapla</button>
+  <select id="bg" aria-label="Arka plan"><option value="">Arka plan: otomatik</option><option value="#ffffff">Beyaz</option><option value="#0e1621">Koyu mavi</option><option value="#000000">Siyah</option></select>
   <button id="spin" aria-pressed="false">Döndür</button>
   <button id="reset">Sıfırla</button>
+  <button id="png">PNG kaydet</button>
+  <button id="full">Tam ekran</button>
   <input type="file" id="file" accept=".cjson,.json,.xyz" hidden>
 </header>
-<main>
+<main id="main">
   <canvas id="cv" aria-label="3 boyutlu molekül modeli"></canvas>
+  <div id="meas"></div>
   <div id="info"></div>
   <div id="drop">Dosyayı buraya bırakın</div>
 </main>
 <script>
 const $=s=>document.querySelector(s);
-const cv=$('#cv'),ctx=cv.getContext('2d'),info=$('#info');
+const cv=$('#cv'),ctx=cv.getContext('2d'),info=$('#info'),main=$('#main'),meas=$('#meas');
 const SYM="H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe".split(' ');
-const COL={H:'#f4f4f4',C:'#6f7a8a',N:'#3f63f5',O:'#e5392e',F:'#6fd05a',P:'#ff8c1a',S:'#f2c500',Cl:'#26c426',Br:'#a63232',I:'#8f1a9a',Na:'#ab5cf2',K:'#8f40d4',Ca:'#3dff00',Mg:'#8aff00',Fe:'#e06633',Cu:'#c88033',Zn:'#7d80b0',Li:'#cc80ff',B:'#ffb5b5',Si:'#f0c8a0',Al:'#bfa6a6'};
+const COL={H:'#f4f4f4',C:'#7c8798',N:'#3f63f5',O:'#e5392e',F:'#6fd05a',P:'#ff8c1a',S:'#f2c500',Cl:'#26c426',Br:'#a63232',I:'#8f1a9a',Na:'#ab5cf2',K:'#8f40d4',Ca:'#3dff00',Mg:'#8aff00',Fe:'#e06633',Cu:'#c88033',Zn:'#7d80b0',Li:'#cc80ff',B:'#ffb5b5',Si:'#f0c8a0',Al:'#bfa6a6'};
 const COV={H:.31,He:.28,Li:1.28,Be:.96,B:.84,C:.76,N:.71,O:.66,F:.57,Ne:.58,Na:1.66,Mg:1.41,Al:1.21,Si:1.11,P:1.07,S:1.05,Cl:1.02,Ar:1.06,K:2.03,Ca:1.76,Fe:1.32,Cu:1.32,Zn:1.22,Br:1.2,I:1.39};
-const cov=s=>COV[s]??1.3, col=s=>COL[s]??'#c46bd1';
+const MASS={H:1.008,He:4.003,Li:6.94,B:10.81,C:12.011,N:14.007,O:15.999,F:18.998,Na:22.99,Mg:24.305,Al:26.982,Si:28.086,P:30.974,S:32.06,Cl:35.45,K:39.098,Ca:40.078,Fe:55.845,Cu:63.546,Zn:65.38,Br:79.904,I:126.904};
+const cov=s=>COV[s]??1.3,col=s=>COL[s]??'#c46bd1',wireCol=s=>s==='H'?'#9aa3b0':col(s);
+const mc={};
+function mix(h,t){const k=h+t;return mc[k]||(mc[k]=(()=>{const n=parseInt(h.slice(1),16),f=t>0?255:0,a=Math.abs(t),c=s=>Math.round(((n>>s)&255)*(1-a)+f*a);return`rgb(${c(16)},${c(8)},${c(0)})`})())}
 
-let mol=null,style='ball',labels=false,auto=false,yaw=.5,pitch=.3,zoom=1,base=1,dirty=true,dpr=1;
+let mol=null,style='ball',labels=0,hideH=false,persp=true,auto=false,yaw=.5,pitch=.3,zoom=1,base=1,dirty=true,dpr=1,P=[],sel=[];
 
 /* ---------- Ayrıştırma ---------- */
+function perceive(m){
+  m.bonds=[];const A=m.atoms,n=A.length;
+  for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
+    const d=Math.hypot(A[i].p[0]-A[j].p[0],A[i].p[1]-A[j].p[1],A[i].p[2]-A[j].p[2]);
+    if(d>.4&&d<(cov(A[i].s)+cov(A[j].s))*1.2)m.bonds.push([i,j,1]);
+  }
+  m.deg=new Array(n).fill(0);m.bonds.forEach(b=>{m.deg[b[0]]++;m.deg[b[1]]++});
+}
 function build(atoms,bonds,name){
   const n=atoms.length;
   if(!n)throw new Error('Dosyada atom bulunamadı.');
   const c=[0,1,2].map(k=>atoms.reduce((s,a)=>s+a.p[k],0)/n);
   atoms.forEach(a=>a.p=a.p.map((v,k)=>v-c[k]));
-  if(!bonds.length){ // bağ yoksa uzaklığa göre tahmin et
-    for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
-      const d=Math.hypot(...atoms[i].p.map((v,k)=>v-atoms[j].p[k]));
-      if(d>.4&&d<(cov(atoms[i].s)+cov(atoms[j].s))*1.2)bonds.push([i,j,1]);
-    }
-  }
-  const deg=new Array(n).fill(0);bonds.forEach(b=>{deg[b[0]]++;deg[b[1]]++});
-  const R=Math.max(1,...atoms.map(a=>Math.hypot(...a.p)));
-  return{atoms,bonds,deg,R,name};
+  const m={atoms,bonds,name,R:Math.max(1,...atoms.map(a=>Math.hypot(...a.p)))};
+  if(bonds.length){m.deg=new Array(n).fill(0);bonds.forEach(b=>{m.deg[b[0]]++;m.deg[b[1]]++})}else perceive(m);
+  return m;
 }
 function parseCJSON(t,fname){
   const j=JSON.parse(t),a=j.atoms;
@@ -83,77 +98,86 @@ function parseCJSON(t,fname){
   if(!xyz)throw new Error('Dosyada 3B koordinat (coords.3d) yok.');
   const atoms=a.elements.number.map((z,i)=>({s:SYM[z-1]||'X',p:[xyz[3*i],xyz[3*i+1],xyz[3*i+2]]}));
   const idx=j.bonds?.connections?.index||[],ord=j.bonds?.order||[],bonds=[];
-  for(let i=0;i<idx.length;i+=2)bonds.push([idx[i],idx[i+1],Math.min(3,Math.max(1,Math.round(ord[i/2]||1)))]);
+  for(let i=0;i<idx.length;i+=2)if(idx[i]<atoms.length&&idx[i+1]<atoms.length)bonds.push([idx[i],idx[i+1],Math.min(3,Math.max(1,Math.round(ord[i/2]||1)))]);
   return build(atoms,bonds,j.name||fname);
 }
 function parseXYZ(t,fname){
   const L=t.trim().split(/\r?\n/),n=parseInt(L[0]),atoms=[];
-  for(let i=2;i<2+n&&i<L.length;i++){
-    const f=L[i].trim().split(/\s+/);
-    atoms.push({s:f[0].replace(/\d+$/,''),p:[+f[1],+f[2],+f[3]]});
-  }
+  for(let i=2;i<2+n&&i<L.length;i++){const f=L[i].trim().split(/\s+/);atoms.push({s:f[0].replace(/\d+$/,''),p:[+f[1],+f[2],+f[3]]})}
   return build(atoms,[],L[1]?.trim()||fname);
 }
 function hill(m){
   const c={};m.atoms.forEach(a=>c[a.s]=(c[a.s]||0)+1);
-  const keys=Object.keys(c).sort(),has=c.C;
-  const order=has?['C','H',...keys.filter(k=>k!=='C'&&k!=='H')]:keys;
-  const sub='₀₁₂₃₄₅₆₇₈₉';
+  const keys=Object.keys(c).sort(),order=c.C?['C','H',...keys.filter(k=>k!=='C'&&k!=='H')]:keys,sub='₀₁₂₃₄₅₆₇₈₉';
   return order.filter(k=>c[k]).map(k=>k+(c[k]>1?String(c[k]).replace(/\d/g,d=>sub[d]):'')).join('');
 }
-function show(m){
-  mol=m;yaw=.5;pitch=.3;zoom=1;dirty=true;info.className='';
-  info.innerHTML=`<b>${hill(m)}</b> <span>&nbsp;${m.atoms.length} atom, ${m.bonds.length} bağ — ${String(m.name).replace(/[<>&]/g,'')}</span>`;
+function updInfo(){
+  const m=mol,ms=m.atoms.every(a=>MASS[a.s])?m.atoms.reduce((s,a)=>s+MASS[a.s],0).toFixed(2)+' g/mol, ':'';
+  info.className='';
+  info.innerHTML=`<b>${hill(m)}</b> &nbsp;${ms}${m.atoms.length} atom, ${m.bonds.length} bağ — ${String(m.name).replace(/[<>&]/g,'')}<small>Atomlara dokunarak uzaklık, açı ve dihedral ölçün. Boş yere dokunmak seçimi temizler.</small>`;
 }
+function show(m){mol=m;sel=[];yaw=.5;pitch=.3;zoom=1;dirty=true;updInfo();updMeas()}
 function fail(e){info.className='err';info.textContent='Açılamadı: '+e.message}
-async function loadFile(f){
-  try{
-    const t=await f.text();
-    show(t.trim().startsWith('{')?parseCJSON(t,f.name):parseXYZ(t,f.name));
-  }catch(e){fail(e)}
-}
+async function loadFile(f){try{const t=await f.text();show(t.trim().startsWith('{')?parseCJSON(t,f.name):parseXYZ(t,f.name))}catch(e){fail(e)}}
 function benzene(){
   const atoms=[],bonds=[];
-  for(let i=0;i<6;i++){
-    const a=i*Math.PI/3,c=Math.cos(a),s=Math.sin(a);
-    atoms.push({s:'C',p:[1.4*c,1.4*s,0]});
-  }
-  for(let i=0;i<6;i++){
-    const a=i*Math.PI/3;atoms.push({s:'H',p:[2.48*Math.cos(a),2.48*Math.sin(a),0]});
-    bonds.push([i,(i+1)%6,i%2?1:2],[i,6+i,1]);
-  }
+  for(let i=0;i<6;i++){const a=i*Math.PI/3;atoms.push({s:'C',p:[1.4*Math.cos(a),1.4*Math.sin(a),0]})}
+  for(let i=0;i<6;i++){const a=i*Math.PI/3;atoms.push({s:'H',p:[2.48*Math.cos(a),2.48*Math.sin(a),0]});bonds.push([i,(i+1)%6,i%2?1:2],[i,6+i,1])}
   return build(atoms,bonds,'Örnek: benzen');
+}
+
+/* ---------- Ölçüm ---------- */
+const V=(a,b)=>a.map((v,k)=>v-b[k]),dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],nm=a=>Math.hypot(...a);
+const cr=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+function updMeas(){
+  if(!mol||!sel.length){meas.className='';return}
+  const p=sel.map(i=>mol.atoms[i].p);let h='';
+  sel.forEach((i,k)=>h+=`<div><i>${k+1}.</i> <b>${mol.atoms[i].s}${i+1}</b></div>`);
+  if(p.length===1)h+=`<div><i>x, y, z</i> ${p[0].map(v=>v.toFixed(3)).join(', ')} Å</div>`;
+  if(p.length>=2)h+=`<div><i>1–2 uzaklık</i> <b>${nm(V(p[0],p[1])).toFixed(3)} Å</b></div>`;
+  if(p.length>=3){const a=V(p[0],p[1]),b=V(p[2],p[1]);
+    h+=`<div><i>2–3 uzaklık</i> <b>${nm(b).toFixed(3)} Å</b></div><div><i>Açı 1–2–3</i> <b>${(Math.acos(dot(a,b)/(nm(a)*nm(b)))*180/Math.PI).toFixed(1)}°</b></div>`}
+  if(p.length===4){const b1=V(p[1],p[0]),b2=V(p[2],p[1]),b3=V(p[3],p[2]),n1=cr(b1,b2),n2=cr(b2,b3),u=b2.map(v=>v/nm(b2));
+    h+=`<div><i>Dihedral</i> <b>${(Math.atan2(dot(cr(n1,n2),u),dot(n1,n2))*180/Math.PI).toFixed(1)}°</b></div>`}
+  meas.innerHTML=h;meas.className='on';
+}
+function pick(cx,cy){
+  const r=cv.getBoundingClientRect(),x=cx-r.left,y=cy-r.top;let best=-1,bz=-1e9;
+  P.forEach(p=>{if(p.vis&&Math.hypot(p.x-x,p.y-y)<=Math.max(p.r,16)&&p.z>bz){bz=p.z;best=p.i}});
+  if(best<0)sel=[];
+  else if(sel.includes(best))sel=sel.filter(i=>i!==best);
+  else sel=sel.length>=4?[best]:[...sel,best];
+  updMeas();dirty=true;
 }
 
 /* ---------- Çizim ---------- */
 function line(x1,y1,x2,y2){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()}
-function wireCol(s){return s==='H'?'#9aa3b0':col(s)}
-function drawBond(pa,pb,o){
-  const wire=style==='wire',k=(pa.k+pb.k)/2;
-  const lw=wire?2.5:.1*base*k*(o>1?.62:1),gap=wire?4.5:.17*base*k;
-  const dx=pb.x-pa.x,dy=pb.y-pa.y,L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L;
-  ctx.lineWidth=lw;ctx.lineCap='round';
+const rw=a=>style==='ball'?.12+cov(a.s)*.22:style==='fill'?cov(a.s)+.45:style==='stick'?.13:.09;
+function atom(p){
+  const r=p.r,c=col(p.a.s);
+  const g=ctx.createRadialGradient(p.x-r*.35,p.y-r*.38,r*.08,p.x,p.y,r);
+  g.addColorStop(0,mix(c,.65));g.addColorStop(.45,c);g.addColorStop(1,mix(c,-.5));
+  ctx.beginPath();ctx.arc(p.x,p.y,r,0,7);ctx.fillStyle=g;ctx.fill();
+}
+function half(p,m,o){
+  const dx=m.x-p.x,dy=m.y-p.y,L=Math.hypot(dx,dy);if(L<.5)return;
+  const nx=-dy/L,ny=dx/L,c=col(p.a.s);
+  if(style==='wire'){
+    ctx.strokeStyle=wireCol(p.a.s);ctx.lineWidth=2.5;ctx.lineCap='round';
+    for(let t=0;t<o;t++){const f=(t-(o-1)/2)*5;line(p.x+nx*f,p.y+ny*f,m.x+nx*f,m.y+ny*f)}return;
+  }
+  const stick=style==='stick',wd=2*(stick?.13:.085)*base*p.k*(o>1?.6:1),gap=(stick?.26:.19)*base*p.k,hw=wd/2;
   for(let t=0;t<o;t++){
-    const off=(t-(o-1)/2)*gap,ax=pa.x+nx*off,ay=pa.y+ny*off,bx=pb.x+nx*off,by=pb.y+ny*off;
-    if(wire){const mx=(ax+bx)/2,my=(ay+by)/2;
-      ctx.strokeStyle=wireCol(pa.a.s);line(ax,ay,mx,my);
-      ctx.strokeStyle=wireCol(pb.a.s);line(mx,my,bx,by);
-    }else{ctx.strokeStyle='#9aa3b0';line(ax,ay,bx,by)}
+    const f=(t-(o-1)/2)*gap,x1=p.x+nx*f,y1=p.y+ny*f,x2=m.x+nx*f,y2=m.y+ny*f;
+    const g=ctx.createLinearGradient(x1-nx*hw,y1-ny*hw,x1+nx*hw,y1+ny*hw);
+    g.addColorStop(0,mix(c,-.4));g.addColorStop(.35,mix(c,.32));g.addColorStop(1,mix(c,-.5));
+    ctx.fillStyle=g;ctx.beginPath();
+    ctx.moveTo(x1-nx*hw,y1-ny*hw);ctx.lineTo(x2-nx*hw,y2-ny*hw);ctx.lineTo(x2+nx*hw,y2+ny*hw);ctx.lineTo(x1+nx*hw,y1+ny*hw);ctx.closePath();ctx.fill();
   }
 }
-function drawAtom(p,rw){
-  const r=Math.max(2.5,rw*base*p.k);
-  ctx.beginPath();ctx.arc(p.x,p.y,r,0,7);ctx.fillStyle=col(p.a.s);ctx.fill();
-  const g=ctx.createRadialGradient(p.x-r*.35,p.y-r*.35,r*.05,p.x,p.y,r);
-  g.addColorStop(0,'rgba(255,255,255,.65)');g.addColorStop(.5,'rgba(255,255,255,0)');g.addColorStop(1,'rgba(0,0,0,.35)');
-  ctx.fillStyle=g;ctx.fill();
-  ctx.lineWidth=1;ctx.strokeStyle='rgba(0,0,0,.25)';ctx.stroke();
-}
-function drawLabel(p,rw){
-  const r=rw*base*p.k;
-  ctx.textBaseline='middle';ctx.lineJoin='round';ctx.strokeStyle='rgba(0,0,0,.65)';ctx.fillStyle='#fff';
-  if(style==='wire'){ctx.font='600 14px system-ui,sans-serif';ctx.textAlign='left';ctx.lineWidth=3;ctx.strokeText(p.a.s,p.x+6,p.y-6);ctx.fillText(p.a.s,p.x+6,p.y-6)}
-  else if(r>6){ctx.font=`600 ${Math.round(r*.95)}px system-ui,sans-serif`;ctx.textAlign='center';ctx.lineWidth=3;ctx.strokeText(p.a.s,p.x,p.y);ctx.fillText(p.a.s,p.x,p.y)}
+function text(s,x,y,size,al){
+  ctx.font=`600 ${size}px system-ui,sans-serif`;ctx.textAlign=al;ctx.textBaseline='middle';ctx.lineJoin='round';
+  ctx.lineWidth=3.5;ctx.strokeStyle='rgba(0,0,0,.7)';ctx.strokeText(s,x,y);ctx.fillStyle='#fff';ctx.fillText(s,x,y);
 }
 function draw(){
   const w=cv.clientWidth,h=cv.clientHeight;
@@ -161,28 +185,27 @@ function draw(){
   if(!mol)return;
   const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
   const ext=mol.R+(style==='fill'?1.8:1.2);
-  base=Math.min(w,h)/(2.3*ext)*zoom;
-  const D=5*ext;
-  const P=mol.atoms.map(a=>{
-    const[x,y,z]=a.p,x1=x*cy+z*sy,z1=-x*sy+z*cy,y2=y*cp-z1*sp,z2=y*sp+z1*cp,k=D/(D-z2);
-    return{x:w/2+x1*base*k,y:h/2-y2*base*k,z:z2,k,a};
+  base=Math.min(w,h)/(2.3*ext)*zoom;const D=5*ext;
+  P=mol.atoms.map((a,i)=>{
+    const[x,y,z]=a.p,x1=x*cy+z*sy,z1=-x*sy+z*cy,y2=y*cp-z1*sp,z2=y*sp+z1*cp,k=persp?D/(D-z2):1;
+    return{x:w/2+x1*base*k,y:h/2-y2*base*k,z:z2,k,a,i,vis:!(hideH&&a.s==='H'),r:Math.max(2.5,rw(a)*base*k)};
   });
-  const rw=a=>style==='ball'?.18+cov(a.s)*.14:style==='fill'?cov(a.s)+.45:.09;
   const items=[];
-  P.forEach((p,i)=>{
-    if(style==='wire'&&mol.deg[i]>0&&!labels)return;
-    items.push({z:p.z,f:()=>{
-      if(style!=='wire'||mol.deg[i]===0)drawAtom(p,rw(p.a));
-      if(labels)drawLabel(p,rw(p.a));
-    }});
+  P.forEach(p=>{if(p.vis&&!(style==='wire'&&mol.deg[p.i]>0))items.push({z:p.z,f:()=>atom(p)})});
+  if(style!=='fill')mol.bonds.forEach(([i,j,o])=>{
+    const a=P[i],b=P[j];if(!a.vis||!b.vis)return;
+    const m={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    // her yarım bağ kendi atomunun hemen arkasına çizilir: doğru örtüşme
+    items.push({z:a.z-1e-3,f:()=>half(a,m,o)},{z:b.z-1e-3,f:()=>half(b,m,o)});
   });
-  if(style!=='fill')mol.bonds.forEach(([i,j,o])=>items.push({z:(P[i].z+P[j].z)/2,f:()=>drawBond(P[i],P[j],o)}));
   items.sort((a,b)=>a.z-b.z).forEach(it=>it.f());
+  if(labels)P.forEach(p=>{if(!p.vis)return;const s=labels==1?p.a.s:String(p.i+1);
+    if(style==='wire'||p.r<9)text(s,p.x+7,p.y-8,13,'left');else text(s,p.x,p.y,Math.round(p.r*.9),'center')});
+  sel.forEach((i,k)=>{const p=P[i];if(!p.vis)return;
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r+5,0,7);ctx.lineWidth=3.5;ctx.strokeStyle='#ffb000';ctx.stroke();
+    text(String(k+1),p.x+p.r+10,p.y-p.r-6,15,'center');});
 }
-function resize(){
-  dpr=window.devicePixelRatio||1;
-  cv.width=Math.round(cv.clientWidth*dpr);cv.height=Math.round(cv.clientHeight*dpr);dirty=true;
-}
+function resize(){dpr=window.devicePixelRatio||1;cv.width=Math.round(cv.clientWidth*dpr);cv.height=Math.round(cv.clientHeight*dpr);dirty=true}
 new ResizeObserver(resize).observe(cv);
 (function tick(){
   if(auto&&!ptrs.size){yaw+=.008;dirty=true}
@@ -190,34 +213,45 @@ new ResizeObserver(resize).observe(cv);
   requestAnimationFrame(tick);
 })();
 
-/* ---------- Etkileşim (fare + dokunmatik) ---------- */
-const ptrs=new Map();let pinch=0;
+/* ---------- Etkileşim ---------- */
+const ptrs=new Map();let pinch=0,moved=0,multi=false;
 const pdist=()=>{if(ptrs.size<2)return 0;const[a,b]=[...ptrs.values()];return Math.hypot(a[0]-b[0],a[1]-b[1])};
-const clampZ=z=>Math.min(6,Math.max(.25,z));
-cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);pinch=pdist()});
+const clampZ=z=>Math.min(8,Math.max(.25,z));
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);if(!ptrs.size){moved=0;multi=false}ptrs.set(e.pointerId,[e.clientX,e.clientY]);if(ptrs.size>1)multi=true;pinch=pdist()});
 cv.addEventListener('pointermove',e=>{
   const o=ptrs.get(e.pointerId);if(!o)return;
-  const n=[e.clientX,e.clientY];ptrs.set(e.pointerId,n);
+  const n=[e.clientX,e.clientY];ptrs.set(e.pointerId,n);moved+=Math.abs(n[0]-o[0])+Math.abs(n[1]-o[1]);
   if(ptrs.size===1){yaw+=(n[0]-o[0])*.01;pitch+=(n[1]-o[1])*.01}
   else if(ptrs.size===2){const d=pdist();if(pinch)zoom=clampZ(zoom*d/pinch);pinch=d}
   dirty=true;
 });
-['pointerup','pointercancel'].forEach(t=>cv.addEventListener(t,e=>{ptrs.delete(e.pointerId);pinch=pdist()}));
+cv.addEventListener('pointerup',e=>{
+  if(ptrs.size===1&&!multi&&moved<8)pick(e.clientX,e.clientY);
+  ptrs.delete(e.pointerId);pinch=pdist();
+});
+cv.addEventListener('pointercancel',e=>{ptrs.delete(e.pointerId);pinch=pdist()});
 cv.addEventListener('wheel',e=>{e.preventDefault();zoom=clampZ(zoom*Math.exp(-e.deltaY*.0015));dirty=true},{passive:false});
 
-/* ---------- Düğmeler ve dosya bırakma ---------- */
+/* ---------- Düğmeler ---------- */
 $('#open').onclick=()=>$('#file').click();
 $('#file').onchange=e=>{if(e.target.files[0])loadFile(e.target.files[0]);e.target.value=''};
 $('#sample').onclick=()=>show(benzene());
 $('#reset').onclick=()=>{yaw=.5;pitch=.3;zoom=1;dirty=true};
+$('#rebond').onclick=()=>{if(!mol)return;perceive(mol);sel=[];updInfo();updMeas();dirty=true};
 document.querySelectorAll('[data-style]').forEach(b=>b.onclick=()=>{
   style=b.dataset.style;
-  document.querySelectorAll('[data-style]').forEach(x=>x.setAttribute('aria-pressed',x===b));
-  dirty=true;
+  document.querySelectorAll('[data-style]').forEach(x=>x.setAttribute('aria-pressed',x===b));dirty=true;
 });
 function toggle(id,fn){const b=$(id);b.onclick=()=>{const v=b.getAttribute('aria-pressed')!=='true';b.setAttribute('aria-pressed',v);fn(v);dirty=true}}
-toggle('#labels',v=>labels=v);
-toggle('#spin',v=>auto=v);
+toggle('#hyd',v=>hideH=!v);toggle('#persp',v=>persp=v);toggle('#spin',v=>auto=v);
+$('#lab').onchange=e=>{labels=+e.target.value;dirty=true};
+$('#bg').onchange=e=>{main.style.background=e.target.value||'var(--bg)';dirty=true};
+$('#full').onclick=()=>document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen?.();
+$('#png').onclick=()=>{
+  draw();const c=document.createElement('canvas');c.width=cv.width;c.height=cv.height;
+  const x=c.getContext('2d');x.fillStyle=getComputedStyle(main).backgroundColor;x.fillRect(0,0,c.width,c.height);x.drawImage(cv,0,0);
+  c.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=String(mol?.name||'molekul').replace(/[^\w-]+/g,'_')+'.png';a.click()});
+};
 addEventListener('dragover',e=>{e.preventDefault();$('#drop').classList.add('on')});
 addEventListener('dragleave',e=>{if(!e.relatedTarget)$('#drop').classList.remove('on')});
 addEventListener('drop',e=>{e.preventDefault();$('#drop').classList.remove('on');if(e.dataTransfer.files[0])loadFile(e.dataTransfer.files[0])});
